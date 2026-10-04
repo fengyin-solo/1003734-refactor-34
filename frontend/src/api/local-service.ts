@@ -1,9 +1,13 @@
 import { MODULE_BY_KEY } from '@/data/modules'
 import { allRows, listRows, resetRows, saveRows } from '@/data/local-store'
+import { COMMUNICATION_KEY, displayStatus, isFaultTicket, normalizeDevices } from './communication'
 import type { ActionResult, EntryRow, ModuleMeta, OverviewResult, PageResult } from '@/data/types'
 
 // 会写进数据的「往回走」动作：命中就把这条记录标成异常态，看板上能一眼看出来。
 const NEGATIVE_ACTIONS = ['撤销', '作废', '拒绝', '驳回', '停用', '忽略', '下线', '回滚']
+
+// 通讯设备有独立的故障工单流（登记→核查→恢复/更换），禁止再走通用的状态直改。
+const BYPASS_BLOCKED_KEYS = new Set([COMMUNICATION_KEY])
 
 export function moduleMeta(key: string): ModuleMeta {
   const meta = MODULE_BY_KEY.get(key)
@@ -30,6 +34,12 @@ export function listEntries(key: string, filters: Record<string, string> = {}): 
 
 export function runAction(key: string, id: number, action: string): ActionResult {
   const meta = moduleMeta(key)
+  if (BYPASS_BLOCKED_KEYS.has(key)) {
+    return {
+      ok: false,
+      message: '通讯设备的故障处理请走故障处置入口（登记故障→现场核查→恢复/更换）',
+    }
+  }
   const target = meta.actionTargets[action]
   if (!target) {
     return { ok: false, message: `${meta.entity}没有登记「${action}」这个动作` }
@@ -63,10 +73,12 @@ export function resetModule(key: string): PageResult {
 
 export function exportEntries(key: string): { filename: string; content: string } {
   const meta = moduleMeta(key)
+  if (key === COMMUNICATION_KEY) normalizeDevices()
   const header = ['编号', ...meta.fields, '当前状态']
   const lines = [header.join(',')]
   for (const row of listRows(key)) {
-    lines.push([row.id, ...meta.fields.map((field) => row[field] ?? ''), row.status].join(','))
+    const status = key === COMMUNICATION_KEY ? displayStatus(row) : row.status
+    lines.push([row.id, ...meta.fields.map((field) => row[field] ?? ''), status].join(','))
   }
   return { filename: `${meta.name}-清单.csv`, content: `\uFEFF${lines.join('\n')}` }
 }
@@ -85,9 +97,24 @@ export function downloadEntries(key: string): void {
 }
 
 export function loadOverview(): OverviewResult {
+  normalizeDevices()
   const rows = allRows()
   const modules = [...MODULE_BY_KEY.values()].map((meta) => {
     const entries = rows[meta.key] ?? []
+    // 通讯模块的待处理/异常以故障工单派生，避免旧种子里的布尔值与真实状态不一致。
+    if (meta.key === COMMUNICATION_KEY) {
+      const devices = entries.map((row) => {
+        const ticket = isFaultTicket(row.faultTicket) ? row.faultTicket : null
+        const open = ticket && ticket.stage !== 'recovered'
+        return { pending: open ? 1 : 0, abnormal: open ? 1 : 0 }
+      })
+      return {
+        name: meta.name,
+        created: entries.length,
+        pending: devices.reduce((sum, item) => sum + item.pending, 0),
+        abnormal: devices.reduce((sum, item) => sum + item.abnormal, 0),
+      }
+    }
     return {
       name: meta.name,
       created: entries.length,

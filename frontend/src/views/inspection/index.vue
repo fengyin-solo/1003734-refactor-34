@@ -7,6 +7,7 @@
       </div>
       <div class="page-actions">
         <button class="btn primary" type="button" @click="openCreate">登记巡检记录</button>
+        <button class="btn" type="button" @click="openCommWorkflow()">通讯故障处理</button>
         <button class="btn" type="button" @click="exportRows">导出巡检记录清单</button>
       </div>
     </header>
@@ -55,6 +56,7 @@
             >
               {{ action }}
             </button>
+            <button class="link" type="button" @click="openCommWorkflow(row)">转通讯故障处理</button>
           </td>
         </tr>
         <tr v-if="!rows.length">
@@ -67,6 +69,8 @@
       <span>共 {{ total }} 条巡检记录记录</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
     </footer>
+
+    <FaultWorkflowDialog :api="workflow" />
   </section>
 </template>
 
@@ -79,6 +83,8 @@ import {
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
+import FaultWorkflowDialog from '@/components/FaultWorkflowDialog.vue'
+import { useFaultWorkflow } from '@/composables/useFaultWorkflow'
 import type { EntryRow } from '@/data/types'
 
 const meta = moduleMeta('inspection')
@@ -86,6 +92,16 @@ const columns = ["记录编号", "站点编号", "巡检日期", "巡检人员",
 const actions = ["完成巡检", "报告故障", "确认处置"]
 const statuses = ["待巡检", "已巡检", "发现故障", "已处置"]
 const stats = [{"label": "本月巡检次数", "value": 0}, {"label": "已巡检站点", "value": 0}, {"label": "待处置故障", "value": 0}]
+
+// 巡检中发现的通讯类问题，直接复用通讯故障处理统一入口（处理单来源会标成巡检记录）。
+const workflow = useFaultWorkflow('巡检记录', () => {})
+
+function openCommWorkflow(row?: EntryRow) {
+  workflow.open({
+    station: row ? String(row['站点编号'] ?? '') : '',
+    sourceRef: row ? `巡检记录 ${String(row['记录编号'] ?? row.id)}` : '',
+  })
+}
 
 const rows = ref<EntryRow[]>([])
 const total = ref(0)

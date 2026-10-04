@@ -30,6 +30,13 @@ export function listEntries(key: string, filters: Record<string, string> = {}): 
 
 export function runAction(key: string, id: number, action: string): ActionResult {
   const meta = moduleMeta(key)
+  // 通讯设备的故障/核查/恢复/更换统一走故障处理入口，旧的通用动作不再直接改状态。
+  if (key === 'communication') {
+    return {
+      ok: false,
+      message: `通讯设备的「${action}」请使用统一的故障处理入口（登记故障 → 故障核查 → 恢复/更换）`,
+    }
+  }
   const target = meta.actionTargets[action]
   if (!target) {
     return { ok: false, message: `${meta.entity}没有登记「${action}」这个动作` }
